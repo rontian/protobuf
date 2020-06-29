@@ -30,26 +30,33 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #endregion
 
+using System;
+using System.Buffers;
+using System.Buffers.Binary;
+using System.Collections.Generic;
+using System.IO;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Security;
+using System.Text;
+using Google.Protobuf.Collections;
+
 namespace Google.Protobuf
 {
-#if GOOGLE_PROTOBUF_SUPPORT_SYSTEM_MEMORY
-    /// <summary>
-    /// Interface for a Protocol Buffers message, supporting
-    /// parsing from <see cref="ParseContext"/> and writing to <see cref="WriteContext"/>.
-    /// </summary>
-    public interface IBufferMessage : IMessage
+    
+    // warning: this is a mutable struct, so it needs to be only passed as a ref!
+    internal struct WriterInternalState
     {
-        /// <summary>
-        /// Internal implementation of merging data from given parse context into this message.
-        /// Users should never invoke this method directly.
-        /// </summary>        
-        void InternalMergeFrom(ref ParseContext ctx);
+        // NOTE: the Span representing the current buffer is kept separate so that this doesn't have to be a ref struct and so it can
+        // be included in CodedOutputStream's internal state
 
-        /// <summary>
-        /// Internal implementation of writing this message to a given write context.
-        /// Users should never invoke this method directly.
-        /// </summary>        
-        void InternalWriteTo(ref WriteContext ctx);
+        internal int limit;  // the size of the current buffer
+        internal int position;  // position in the current buffer
+
+        internal WriteBufferHelper writeBufferHelper;
+
+        // If non-null, the top level parse method was started with given coded output stream as an argument
+        // which also means we can potentially fallback to calling WriteTo(CodedOutputStream cos) if needed.
+        internal CodedOutputStream CodedOutputStream => writeBufferHelper.CodedOutputStream;
     }
-#endif
 }
