@@ -30,24 +30,35 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #endregion
 
+using System;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+
 namespace Google.Protobuf
 {
     /// <summary>
-    /// Interface for a Protocol Buffers message, supporting
-    /// parsing from <see cref="ParseContext"/> and writing to <see cref="WriteContext"/>.
+    /// SecuritySafeCritical attribute can not be placed on types with async methods.
+    /// This class has ByteString's async methods so it can be marked with SecuritySafeCritical.
     /// </summary>
-    public interface IBufferMessage : IMessage
+    internal static class ByteStringAsync
     {
-        /// <summary>
-        /// Internal implementation of merging data from given parse context into this message.
-        /// Users should never invoke this method directly.
-        /// </summary>        
-        void InternalMergeFrom(ref ParseContext ctx);
-
-        /// <summary>
-        /// Internal implementation of writing this message to a given write context.
-        /// Users should never invoke this method directly.
-        /// </summary>        
-        void InternalWriteTo(ref WriteContext ctx);
+#if !NET35
+        internal static async Task<ByteString> FromStreamAsyncCore(Stream stream, CancellationToken cancellationToken)
+        {
+            int capacity = stream.CanSeek ? checked((int)(stream.Length - stream.Position)) : 0;
+            var memoryStream = new MemoryStream(capacity);
+            // We have to specify the buffer size here, as there's no overload accepting the cancellation token
+            // alone. But it's documented to use 81920 by default if not specified.
+            await stream.CopyToAsync(memoryStream, 81920, cancellationToken);
+#if NETSTANDARD1_1
+            byte[] bytes = memoryStream.ToArray();
+#else
+            // Avoid an extra copy if we can.
+            byte[] bytes = memoryStream.Length == memoryStream.Capacity ? memoryStream.GetBuffer() : memoryStream.ToArray();
+#endif
+            return ByteString.AttachBytes(bytes);
+        }
+#endif
     }
 }
