@@ -37,17 +37,17 @@
 
 namespace google {
 namespace protobuf {
-class FieldDescriptor;         // descriptor.h
-class Descriptor;              // descriptor.h
-class ServiceDescriptor;       // descriptor.h
+class FieldDescriptor;    // descriptor.h
+class Descriptor;         // descriptor.h
+class ServiceDescriptor;  // descriptor.h
 namespace compiler {
-  namespace java {
-    class MessageGenerator;    // message.h
-    class ExtensionGenerator;  // extension.h
-    class ServiceGenerator;    // service.h
-    class Context;             // context.h
-  }
-}
+namespace java {
+class MessageGenerator;    // message.h
+class ExtensionGenerator;  // extension.h
+class ServiceGenerator;    // service.h
+class Context;             // context.h
+}  // namespace java
+}  // namespace compiler
 }  // namespace protobuf
 }  // namespace google
 
@@ -81,13 +81,13 @@ class ImmutableGeneratorFactory : public GeneratorFactory {
   virtual ~ImmutableGeneratorFactory();
 
   virtual MessageGenerator* NewMessageGenerator(
-      const Descriptor* descriptor) const;
+      const Descriptor* descriptor) const override;
 
   virtual ExtensionGenerator* NewExtensionGenerator(
-      const FieldDescriptor* descriptor) const;
+      const FieldDescriptor* descriptor) const override;
 
   virtual ServiceGenerator* NewServiceGenerator(
-      const ServiceDescriptor* descriptor) const;
+      const ServiceDescriptor* descriptor) const override;
 
  private:
   Context* context_;

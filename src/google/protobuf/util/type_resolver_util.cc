@@ -37,8 +37,12 @@
 #include <google/protobuf/util/internal/utility.h>
 #include <google/protobuf/util/type_resolver.h>
 #include <google/protobuf/stubs/strutil.h>
-
 #include <google/protobuf/stubs/status.h>
+#include <google/protobuf/stubs/status.h>
+
+// clang-format off
+#include <google/protobuf/port_def.inc>
+// clang-format on
 
 namespace google {
 namespace protobuf {
@@ -60,46 +64,44 @@ using google::protobuf::Type;
 using google::protobuf::UInt32Value;
 using google::protobuf::UInt64Value;
 
-using util::Status;
-using util::error::INVALID_ARGUMENT;
-using util::error::NOT_FOUND;
-
 class DescriptorPoolTypeResolver : public TypeResolver {
  public:
-  DescriptorPoolTypeResolver(const string& url_prefix,
+  DescriptorPoolTypeResolver(const std::string& url_prefix,
                              const DescriptorPool* pool)
       : url_prefix_(url_prefix), pool_(pool) {}
 
-  Status ResolveMessageType(const string& type_url, Type* type) override {
-    string type_name;
-    Status status = ParseTypeUrl(type_url, &type_name);
+  util::Status ResolveMessageType(const std::string& type_url,
+                                  Type* type) override {
+    std::string type_name;
+    util::Status status = ParseTypeUrl(type_url, &type_name);
     if (!status.ok()) {
       return status;
     }
 
     const Descriptor* descriptor = pool_->FindMessageTypeByName(type_name);
     if (descriptor == NULL) {
-      return Status(util::error::NOT_FOUND,
-                    "Invalid type URL, unknown type: " + type_name);
+      return util::NotFoundError("Invalid type URL, unknown type: " +
+                                 type_name);
     }
     ConvertDescriptor(descriptor, type);
-    return Status();
+    return util::Status();
   }
 
-  Status ResolveEnumType(const string& type_url, Enum* enum_type) override {
-    string type_name;
-    Status status = ParseTypeUrl(type_url, &type_name);
+  util::Status ResolveEnumType(const std::string& type_url,
+                               Enum* enum_type) override {
+    std::string type_name;
+    util::Status status = ParseTypeUrl(type_url, &type_name);
     if (!status.ok()) {
       return status;
     }
 
     const EnumDescriptor* descriptor = pool_->FindEnumTypeByName(type_name);
     if (descriptor == NULL) {
-      return Status(util::error::NOT_FOUND,
-                    "Invalid type URL, unknown type: " + type_name);
+      return util::InvalidArgumentError("Invalid type URL, unknown type: " +
+                                        type_name);
     }
     ConvertEnumDescriptor(descriptor, enum_type);
-    return Status();
+    return util::Status();
   }
 
  private:
@@ -210,7 +212,7 @@ class DescriptorPoolTypeResolver : public TypeResolver {
                 : reflection->GetBool(options, field)));
         return;
       case FieldDescriptor::CPPTYPE_STRING: {
-        const string& val =
+        const std::string& val =
             field->is_repeated()
                 ? reflection->GetRepeatedString(options, field, index)
                 : reflection->GetString(options, field);
@@ -293,38 +295,38 @@ class DescriptorPoolTypeResolver : public TypeResolver {
     ConvertEnumOptions(descriptor->options(), enum_type->mutable_options());
   }
 
-  string GetTypeUrl(const Descriptor* descriptor) {
+  std::string GetTypeUrl(const Descriptor* descriptor) {
     return url_prefix_ + "/" + descriptor->full_name();
   }
 
-  string GetTypeUrl(const EnumDescriptor* descriptor) {
+  std::string GetTypeUrl(const EnumDescriptor* descriptor) {
     return url_prefix_ + "/" + descriptor->full_name();
   }
 
-  Status ParseTypeUrl(const string& type_url, string* type_name) {
+  util::Status ParseTypeUrl(const std::string& type_url,
+                            std::string* type_name) {
     if (type_url.substr(0, url_prefix_.size() + 1) != url_prefix_ + "/") {
-      return Status(
-          util::error::INVALID_ARGUMENT,
+      return util::InvalidArgumentError(
           StrCat("Invalid type URL, type URLs must be of the form '",
                        url_prefix_, "/<typename>', got: ", type_url));
     }
     *type_name = type_url.substr(url_prefix_.size() + 1);
-    return Status();
+    return util::Status();
   }
 
-  string DefaultValueAsString(const FieldDescriptor* descriptor) {
+  std::string DefaultValueAsString(const FieldDescriptor* descriptor) {
     switch (descriptor->cpp_type()) {
       case FieldDescriptor::CPPTYPE_INT32:
-        return SimpleItoa(descriptor->default_value_int32());
+        return StrCat(descriptor->default_value_int32());
         break;
       case FieldDescriptor::CPPTYPE_INT64:
-        return SimpleItoa(descriptor->default_value_int64());
+        return StrCat(descriptor->default_value_int64());
         break;
       case FieldDescriptor::CPPTYPE_UINT32:
-        return SimpleItoa(descriptor->default_value_uint32());
+        return StrCat(descriptor->default_value_uint32());
         break;
       case FieldDescriptor::CPPTYPE_UINT64:
-        return SimpleItoa(descriptor->default_value_uint64());
+        return StrCat(descriptor->default_value_uint64());
         break;
       case FieldDescriptor::CPPTYPE_FLOAT:
         return SimpleFtoa(descriptor->default_value_float());
@@ -352,13 +354,13 @@ class DescriptorPoolTypeResolver : public TypeResolver {
     return "";
   }
 
-  string url_prefix_;
+  std::string url_prefix_;
   const DescriptorPool* pool_;
 };
 
 }  // namespace
 
-TypeResolver* NewTypeResolverForDescriptorPool(const string& url_prefix,
+TypeResolver* NewTypeResolverForDescriptorPool(const std::string& url_prefix,
                                                const DescriptorPool* pool) {
   return new DescriptorPoolTypeResolver(url_prefix, pool);
 }

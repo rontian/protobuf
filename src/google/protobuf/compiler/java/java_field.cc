@@ -62,15 +62,16 @@ namespace java {
 
 namespace {
 
-ImmutableFieldGenerator* MakeImmutableGenerator(
-    const FieldDescriptor* field, int messageBitIndex, int builderBitIndex,
-    Context* context) {
+ImmutableFieldGenerator* MakeImmutableGenerator(const FieldDescriptor* field,
+                                                int messageBitIndex,
+                                                int builderBitIndex,
+                                                Context* context) {
   if (field->is_repeated()) {
     switch (GetJavaType(field)) {
       case JAVATYPE_MESSAGE:
         if (IsMapEntry(field->message_type())) {
-          return new ImmutableMapFieldGenerator(
-              field, messageBitIndex, builderBitIndex, context);
+          return new ImmutableMapFieldGenerator(field, messageBitIndex,
+                                                builderBitIndex, context);
         } else {
           return new RepeatedImmutableMessageFieldGenerator(
               field, messageBitIndex, builderBitIndex, context);
@@ -86,14 +87,14 @@ ImmutableFieldGenerator* MakeImmutableGenerator(
             field, messageBitIndex, builderBitIndex, context);
     }
   } else {
-    if (field->containing_oneof()) {
+    if (IsRealOneof(field)) {
       switch (GetJavaType(field)) {
         case JAVATYPE_MESSAGE:
           return new ImmutableMessageOneofFieldGenerator(
               field, messageBitIndex, builderBitIndex, context);
         case JAVATYPE_ENUM:
-          return new ImmutableEnumOneofFieldGenerator(
-              field, messageBitIndex, builderBitIndex, context);
+          return new ImmutableEnumOneofFieldGenerator(field, messageBitIndex,
+                                                      builderBitIndex, context);
         case JAVATYPE_STRING:
           return new ImmutableStringOneofFieldGenerator(
               field, messageBitIndex, builderBitIndex, context);
@@ -104,17 +105,17 @@ ImmutableFieldGenerator* MakeImmutableGenerator(
     } else {
       switch (GetJavaType(field)) {
         case JAVATYPE_MESSAGE:
-          return new ImmutableMessageFieldGenerator(
-              field, messageBitIndex, builderBitIndex, context);
+          return new ImmutableMessageFieldGenerator(field, messageBitIndex,
+                                                    builderBitIndex, context);
         case JAVATYPE_ENUM:
-          return new ImmutableEnumFieldGenerator(
-              field, messageBitIndex, builderBitIndex, context);
+          return new ImmutableEnumFieldGenerator(field, messageBitIndex,
+                                                 builderBitIndex, context);
         case JAVATYPE_STRING:
-          return new ImmutableStringFieldGenerator(
-              field, messageBitIndex, builderBitIndex, context);
+          return new ImmutableStringFieldGenerator(field, messageBitIndex,
+                                                   builderBitIndex, context);
         default:
-          return new ImmutablePrimitiveFieldGenerator(
-              field, messageBitIndex, builderBitIndex, context);
+          return new ImmutablePrimitiveFieldGenerator(field, messageBitIndex,
+                                                      builderBitIndex, context);
       }
     }
   }
@@ -143,7 +144,7 @@ ImmutableFieldLiteGenerator* MakeImmutableLiteGenerator(
             field, messageBitIndex, context);
     }
   } else {
-    if (field->containing_oneof()) {
+    if (IsRealOneof(field)) {
       switch (GetJavaType(field)) {
         case JAVATYPE_MESSAGE:
           return new ImmutableMessageOneofFieldLiteGenerator(
@@ -192,17 +193,12 @@ static inline void ReportUnexpectedPackedFieldsCall(io::Printer* printer) {
 
 ImmutableFieldGenerator::~ImmutableFieldGenerator() {}
 
-void ImmutableFieldGenerator::
-GenerateParsingCodeFromPacked(io::Printer* printer) const {
+void ImmutableFieldGenerator::GenerateParsingCodeFromPacked(
+    io::Printer* printer) const {
   ReportUnexpectedPackedFieldsCall(printer);
 }
 
 ImmutableFieldLiteGenerator::~ImmutableFieldLiteGenerator() {}
-
-void ImmutableFieldLiteGenerator::
-GenerateParsingCodeFromPacked(io::Printer* printer) const {
-  ReportUnexpectedPackedFieldsCall(printer);
-}
 
 // ===================================================================
 
@@ -223,7 +219,7 @@ FieldGeneratorMap<ImmutableFieldGenerator>::FieldGeneratorMap(
   }
 }
 
-template<>
+template <>
 FieldGeneratorMap<ImmutableFieldGenerator>::~FieldGeneratorMap() {}
 
 template <>
@@ -241,46 +237,66 @@ FieldGeneratorMap<ImmutableFieldLiteGenerator>::FieldGeneratorMap(
   }
 }
 
-template<>
+template <>
 FieldGeneratorMap<ImmutableFieldLiteGenerator>::~FieldGeneratorMap() {}
 
 
 void SetCommonFieldVariables(const FieldDescriptor* descriptor,
                              const FieldGeneratorInfo* info,
-                             std::map<string, string>* variables) {
+                             std::map<std::string, std::string>* variables) {
   (*variables)["field_name"] = descriptor->name();
   (*variables)["name"] = info->name;
   (*variables)["classname"] = descriptor->containing_type()->name();
   (*variables)["capitalized_name"] = info->capitalized_name;
   (*variables)["disambiguated_reason"] = info->disambiguated_reason;
   (*variables)["constant_name"] = FieldConstantName(descriptor);
-  (*variables)["number"] = SimpleItoa(descriptor->number());
+  (*variables)["number"] = StrCat(descriptor->number());
+  (*variables)["kt_dsl_builder"] = "_builder";
   // These variables are placeholders to pick out the beginning and ends of
   // identifiers for annotations (when doing so with existing variables would
   // be ambiguous or impossible). They should never be set to anything but the
   // empty string.
   (*variables)["{"] = "";
   (*variables)["}"] = "";
+  (*variables)["kt_name"] =
+      IsForbiddenKotlin(info->name) ? info->name + "_" : info->name;
+  (*variables)["kt_capitalized_name"] = IsForbiddenKotlin(info->name)
+                                            ? info->capitalized_name + "_"
+                                            : info->capitalized_name;
+  if (!descriptor->is_repeated()) {
+    (*variables)["annotation_field_type"] = FieldTypeName(descriptor->type());
+  } else if (GetJavaType(descriptor) == JAVATYPE_MESSAGE &&
+             IsMapEntry(descriptor->message_type())) {
+    (*variables)["annotation_field_type"] =
+        std::string(FieldTypeName(descriptor->type())) + "MAP";
+  } else {
+    (*variables)["annotation_field_type"] =
+        std::string(FieldTypeName(descriptor->type())) + "_LIST";
+    if (descriptor->is_packed()) {
+      (*variables)["annotation_field_type"] =
+          (*variables)["annotation_field_type"] + "_PACKED";
+    }
+  }
 }
 
 void SetCommonOneofVariables(const FieldDescriptor* descriptor,
                              const OneofGeneratorInfo* info,
-                             std::map<string, string>* variables) {
+                             std::map<std::string, std::string>* variables) {
   (*variables)["oneof_name"] = info->name;
   (*variables)["oneof_capitalized_name"] = info->capitalized_name;
   (*variables)["oneof_index"] =
-      SimpleItoa(descriptor->containing_oneof()->index());
+      StrCat(descriptor->containing_oneof()->index());
+  (*variables)["oneof_stored_type"] = GetOneofStoredType(descriptor);
   (*variables)["set_oneof_case_message"] =
-      info->name + "Case_ = " + SimpleItoa(descriptor->number());
-  (*variables)["clear_oneof_case_message"] = info->name +
-      "Case_ = 0";
+      info->name + "Case_ = " + StrCat(descriptor->number());
+  (*variables)["clear_oneof_case_message"] = info->name + "Case_ = 0";
   (*variables)["has_oneof_case_message"] =
-      info->name + "Case_ == " + SimpleItoa(descriptor->number());
+      info->name + "Case_ == " + StrCat(descriptor->number());
 }
 
-void PrintExtraFieldInfo(const std::map<string, string>& variables,
+void PrintExtraFieldInfo(const std::map<std::string, std::string>& variables,
                          io::Printer* printer) {
-  const std::map<string, string>::const_iterator it =
+  const std::map<std::string, std::string>::const_iterator it =
       variables.find("disambiguated_reason");
   if (it != variables.end() && !it->second.empty()) {
     printer->Print(

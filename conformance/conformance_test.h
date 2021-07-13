@@ -40,12 +40,11 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 #include <google/protobuf/descriptor.h>
-#include <google/protobuf/stubs/common.h>
-#include <google/protobuf/util/type_resolver.h>
 #include <google/protobuf/wire_format_lite.h>
-
+#include <google/protobuf/util/type_resolver.h>
 #include "conformance.pb.h"
 
 namespace conformance {
@@ -84,10 +83,17 @@ class ConformanceTestRunner {
 // over a pipe.
 class ForkPipeRunner : public ConformanceTestRunner {
  public:
+  // Note: Run() doesn't take ownership of the pointers inside suites.
   static int Run(int argc, char *argv[],
-                 ConformanceTestSuite* suite);
+                 const std::vector<ConformanceTestSuite*>& suites);
 
-  ForkPipeRunner(const std::string &executable)
+  ForkPipeRunner(const std::string& executable,
+                 const std::vector<std::string>& executable_args)
+      : child_pid_(-1),
+        executable_(executable),
+        executable_args_(executable_args) {}
+
+  explicit ForkPipeRunner(const std::string& executable)
       : child_pid_(-1), executable_(executable) {}
 
   virtual ~ForkPipeRunner() {}
@@ -107,6 +113,7 @@ class ForkPipeRunner : public ConformanceTestRunner {
   int read_fd_;
   pid_t child_pid_;
   std::string executable_;
+  const std::vector<std::string> executable_args_;
   std::string current_test_name_;
 };
 
@@ -139,19 +146,13 @@ class ForkPipeRunner : public ConformanceTestRunner {
 //
 class ConformanceTestSuite {
  public:
-  ConformanceTestSuite() : verbose_(false), enforce_recommended_(false) {}
+  ConformanceTestSuite()
+      : verbose_(false),
+        enforce_recommended_(false),
+        failure_list_flag_name_("--failure_list") {}
   virtual ~ConformanceTestSuite() {}
 
   void SetVerbose(bool verbose) { verbose_ = verbose; }
-
-  // Sets the list of tests that are expected to fail when RunSuite() is called.
-  // RunSuite() will fail unless the set of failing tests is exactly the same
-  // as this list.
-  //
-  // The filename here is *only* used to create/format useful error messages for
-  // how to update the failure list.  We do NOT read this file at all.
-  void SetFailureList(const std::string& filename,
-                      const std::vector<std::string>& failure_list);
 
   // Whether to require the testee to pass RECOMMENDED tests. By default failing
   // a RECOMMENDED test case will not fail the entire suite but will only
@@ -165,19 +166,30 @@ class ConformanceTestSuite {
     enforce_recommended_ = value;
   }
 
+  // Gets the flag name to the failure list file.
+  // By default, this would return --failure_list
+  std::string GetFailureListFlagName() { return failure_list_flag_name_; }
+
+  void SetFailureListFlagName(const std::string& failure_list_flag_name) {
+    failure_list_flag_name_ = failure_list_flag_name;
+  }
+
   // Run all the conformance tests against the given test runner.
   // Test output will be stored in "output".
   //
   // Returns true if the set of failing tests was exactly the same as the
-  // failure list.  If SetFailureList() was not called, returns true if all
-  // tests passed.
-  bool RunSuite(ConformanceTestRunner* runner, std::string* output);
+  // failure list.
+  // The filename here is *only* used to create/format useful error messages for
+  // how to update the failure list.  We do NOT read this file at all.
+  bool RunSuite(ConformanceTestRunner* runner, std::string* output,
+                const std::string& filename,
+                conformance::FailureSet* failure_list);
 
  protected:
   // Test cases are classified into a few categories:
   //   REQUIRED: the test case must be passed for an implementation to be
   //             interoperable with other implementations. For example, a
-  //             parser implementaiton must accept both packed and unpacked
+  //             parser implementation must accept both packed and unpacked
   //             form of repeated primitive fields.
   //   RECOMMENDED: the test case is not required for the implementation to
   //                be interoperable with other implementations, but is
@@ -193,18 +205,18 @@ class ConformanceTestSuite {
 
   class ConformanceRequestSetting {
    public:
-    ConformanceRequestSetting(
-        ConformanceLevel level,
-        conformance::WireFormat input_format,
-        conformance::WireFormat output_format,
-        conformance::TestCategory test_category,
-        const Message& prototype_message,
-        const string& test_name, const string& input);
+    ConformanceRequestSetting(ConformanceLevel level,
+                              conformance::WireFormat input_format,
+                              conformance::WireFormat output_format,
+                              conformance::TestCategory test_category,
+                              const Message& prototype_message,
+                              const std::string& test_name,
+                              const std::string& input);
     virtual ~ConformanceRequestSetting() {}
 
-    Message* GetTestMessage() const;
+    std::unique_ptr<Message> NewTestMessage() const;
 
-    string GetTestName() const;
+    std::string GetTestName() const;
 
     const conformance::ConformanceRequest& GetRequest() const {
       return request_;
@@ -214,11 +226,20 @@ class ConformanceTestSuite {
       return level_;
     }
 
-    string ConformanceLevelToString(ConformanceLevel level) const;
+    std::string ConformanceLevelToString(ConformanceLevel level) const;
+
+    void SetPrintUnknownFields(bool print_unknown_fields) {
+      request_.set_print_unknown_fields(true);
+    }
+
+    void SetPrototypeMessageForCompare(const Message& message) {
+      prototype_message_for_compare_.reset(message.New());
+    }
 
    protected:
-    virtual string InputFormatString(conformance::WireFormat format) const;
-    virtual string OutputFormatString(conformance::WireFormat format) const;
+    virtual std::string InputFormatString(conformance::WireFormat format) const;
+    virtual std::string OutputFormatString(
+        conformance::WireFormat format) const;
     conformance::ConformanceRequest request_;
 
    private:
@@ -226,12 +247,13 @@ class ConformanceTestSuite {
     ::conformance::WireFormat input_format_;
     ::conformance::WireFormat output_format_;
     const Message& prototype_message_;
-    string test_name_;
+    std::unique_ptr<Message> prototype_message_for_compare_;
+    std::string test_name_;
   };
 
-  bool CheckSetEmpty(const std::set<string>& set_to_check,
+  bool CheckSetEmpty(const std::set<std::string>& set_to_check,
                      const std::string& write_to_file, const std::string& msg);
-  string WireFormatToString(conformance::WireFormat wire_format);
+  std::string WireFormatToString(conformance::WireFormat wire_format);
 
   // Parse payload in the response to the given message. Returns true on
   // success.
@@ -240,30 +262,31 @@ class ConformanceTestSuite {
       const ConformanceRequestSetting& setting,
       Message* test_message) = 0;
 
-  void VerifyResponse(
-      const ConformanceRequestSetting& setting,
-      const string& equivalent_wire_format,
-      const conformance::ConformanceResponse& response,
-      bool need_report_success);
+  void VerifyResponse(const ConformanceRequestSetting& setting,
+                      const std::string& equivalent_wire_format,
+                      const conformance::ConformanceResponse& response,
+                      bool need_report_success, bool require_same_wire_format);
 
   void ReportSuccess(const std::string& test_name);
-  void ReportFailure(const string& test_name,
-                     ConformanceLevel level,
+  void ReportFailure(const std::string& test_name, ConformanceLevel level,
                      const conformance::ConformanceRequest& request,
                      const conformance::ConformanceResponse& response,
                      const char* fmt, ...);
-  void ReportSkip(const string& test_name,
+  void ReportSkip(const std::string& test_name,
                   const conformance::ConformanceRequest& request,
                   const conformance::ConformanceResponse& response);
 
   void RunValidInputTest(const ConformanceRequestSetting& setting,
-                         const string& equivalent_text_format);
+                         const std::string& equivalent_text_format);
   void RunValidBinaryInputTest(const ConformanceRequestSetting& setting,
-                               const string& equivalent_wire_format);
+                               const std::string& equivalent_wire_format,
+                               bool require_same_wire_format = false);
 
   void RunTest(const std::string& test_name,
                const conformance::ConformanceRequest& request,
                conformance::ConformanceResponse* response);
+
+  void AddExpectedFailedTest(const std::string& test_name);
 
   virtual void RunSuiteImpl() = 0;
 
@@ -273,6 +296,7 @@ class ConformanceTestSuite {
   bool verbose_;
   bool enforce_recommended_;
   std::string output_;
+  std::string failure_list_flag_name_;
   std::string failure_list_filename_;
 
   // The set of test names that are expected to fail in this run, but haven't

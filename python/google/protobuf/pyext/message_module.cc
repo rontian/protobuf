@@ -30,10 +30,11 @@
 
 #include <Python.h>
 
-#include <google/protobuf/pyext/message.h>
-#include <google/protobuf/proto_api.h>
-
 #include <google/protobuf/message_lite.h>
+#include <google/protobuf/pyext/descriptor_pool.h>
+#include <google/protobuf/pyext/message.h>
+#include <google/protobuf/pyext/message_factory.h>
+#include <google/protobuf/proto_api.h>
 
 namespace {
 
@@ -45,37 +46,51 @@ struct ApiImplementation : google::protobuf::python::PyProto_API {
   google::protobuf::Message* GetMutableMessagePointer(PyObject* msg) const override {
     return google::protobuf::python::PyMessage_GetMutableMessagePointer(msg);
   }
+  const google::protobuf::DescriptorPool* GetDefaultDescriptorPool() const override {
+    return google::protobuf::python::GetDefaultDescriptorPool()->pool;
+  }
+
+  google::protobuf::MessageFactory* GetDefaultMessageFactory() const override {
+    return google::protobuf::python::GetDefaultDescriptorPool()
+        ->py_message_factory->message_factory;
+  }
+  PyObject* NewMessage(const google::protobuf::Descriptor* descriptor,
+                       PyObject* py_message_factory) const override {
+    return google::protobuf::python::PyMessage_New(descriptor, py_message_factory);
+  }
+  PyObject* NewMessageOwnedExternally(
+      google::protobuf::Message* msg, PyObject* py_message_factory) const override {
+    return google::protobuf::python::PyMessage_NewMessageOwnedExternally(
+        msg, py_message_factory);
+  }
 };
 
 }  // namespace
 
 static const char module_docstring[] =
-"python-proto2 is a module that can be used to enhance proto2 Python API\n"
-"performance.\n"
-"\n"
-"It provides access to the protocol buffers C++ reflection API that\n"
-"implements the basic protocol buffer functions.";
+    "python-proto2 is a module that can be used to enhance proto2 Python API\n"
+    "performance.\n"
+    "\n"
+    "It provides access to the protocol buffers C++ reflection API that\n"
+    "implements the basic protocol buffer functions.";
 
 static PyMethodDef ModuleMethods[] = {
-  {"SetAllowOversizeProtos",
-    (PyCFunction)google::protobuf::python::cmessage::SetAllowOversizeProtos,
-    METH_O, "Enable/disable oversize proto parsing."},
-  // DO NOT USE: For migration and testing only.
-  { NULL, NULL}
-};
+    {"SetAllowOversizeProtos",
+     (PyCFunction)google::protobuf::python::cmessage::SetAllowOversizeProtos, METH_O,
+     "Enable/disable oversize proto parsing."},
+    // DO NOT USE: For migration and testing only.
+    {NULL, NULL}};
 
 #if PY_MAJOR_VERSION >= 3
-static struct PyModuleDef _module = {
-  PyModuleDef_HEAD_INIT,
-  "_message",
-  module_docstring,
-  -1,
-  ModuleMethods,  /* m_methods */
-  NULL,
-  NULL,
-  NULL,
-  NULL
-};
+static struct PyModuleDef _module = {PyModuleDef_HEAD_INIT,
+                                     "_message",
+                                     module_docstring,
+                                     -1,
+                                     ModuleMethods, /* m_methods */
+                                     NULL,
+                                     NULL,
+                                     NULL,
+                                     NULL};
 #define INITFUNC PyInit__message
 #define INITFUNC_ERRORVAL NULL
 #else  // Python 2
@@ -100,9 +115,12 @@ PyMODINIT_FUNC INITFUNC() {
   }
 
   // Adds the C++ API
-  if (PyObject* api =
-          PyCapsule_New(new ApiImplementation(),
-                        google::protobuf::python::PyProtoAPICapsuleName(), NULL)) {
+  if (PyObject* api = PyCapsule_New(
+          new ApiImplementation(), google::protobuf::python::PyProtoAPICapsuleName(),
+          [](PyObject* o) {
+            delete (ApiImplementation*)PyCapsule_GetPointer(
+                o, google::protobuf::python::PyProtoAPICapsuleName());
+          })) {
     PyModule_AddObject(m, "proto_API", api);
   } else {
     return INITFUNC_ERRORVAL;

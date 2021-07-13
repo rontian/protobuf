@@ -44,6 +44,7 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import junit.framework.TestCase;
 
 /**
@@ -1141,6 +1142,39 @@ public class CodedInputStreamTest extends TestCase {
     }
   }
 
+  public void testIterableByteBufferInputStreamReadBytesWithAlias() throws Exception {
+    ByteArrayOutputStream byteArrayStream = new ByteArrayOutputStream();
+    CodedOutputStream output = CodedOutputStream.newInstance(byteArrayStream);
+    // A bytes field large enough that won't fit into the default block buffer.
+    // 4.5 is to test the case where the total size of input is not aligned with DEFAULT_BLOCK_SIZE.
+    final int bytesLength = DEFAULT_BLOCK_SIZE * 4 + (DEFAULT_BLOCK_SIZE / 2);
+    byte[] bytes = new byte[bytesLength];
+    for (int i = 0; i < bytesLength; i++) {
+      bytes[i] = (byte) (i % 256);
+    }
+    output.writeByteArrayNoTag(bytes);
+    output.flush();
+
+    // Input data is split into multiple ByteBuffers so that a single bytes spans across them.
+    // CodedInputStream with aliasing will decode it as a consequent rope by wrapping ByteBuffers.
+    byte[] data = byteArrayStream.toByteArray();
+    ArrayList<ByteBuffer> input = new ArrayList<>();
+    for (int i = 0; i < data.length; i += DEFAULT_BLOCK_SIZE) {
+      int rl = Math.min(DEFAULT_BLOCK_SIZE, data.length - i);
+      ByteBuffer rb = ByteBuffer.allocateDirect(rl);
+      rb.put(data, i, rl);
+      rb.flip();
+      input.add(rb);
+    }
+    final CodedInputStream inputStream = CodedInputStream.newInstance(input, true);
+    inputStream.enableAliasing(true);
+
+    ByteString result = inputStream.readBytes();
+    for (int i = 0; i < bytesLength; i++) {
+      assertEquals((byte) (i % 256), result.byteAt(i));
+    }
+  }
+
   public void testCompatibleTypes() throws Exception {
     long data = 0x100000000L;
     Int64Message message = Int64Message.newBuilder().setData(data).build();
@@ -1184,6 +1218,99 @@ public class CodedInputStreamTest extends TestCase {
       } catch (InvalidProtocolBufferException e) {
         // Expected
       }
+    }
+  }
+
+  public void testSkipPastEndOfByteArrayInput() throws Exception {
+    try {
+      CodedInputStream.newInstance(new ByteArrayInputStream(new byte[100])).skipRawBytes(101);
+      fail();
+    } catch (InvalidProtocolBufferException e) {
+      // Expected
+    }
+  }
+
+  public void testMaliciousInputStream() throws Exception {
+    ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+    CodedOutputStream codedOutputStream = CodedOutputStream.newInstance(outputStream);
+    codedOutputStream.writeByteArrayNoTag(new byte[] { 0x0, 0x1, 0x2, 0x3, 0x4, 0x5 });
+    codedOutputStream.flush();
+    final List<byte[]> maliciousCapture = new ArrayList<>();
+    InputStream inputStream = new ByteArrayInputStream(outputStream.toByteArray()) {
+      @Override
+      public synchronized int read(byte[] b, int off, int len) {
+        maliciousCapture.add(b);
+        return super.read(b, off, len);
+      }
+    };
+
+    // test ByteString
+
+    CodedInputStream codedInputStream = CodedInputStream.newInstance(inputStream, 1);
+    ByteString byteString = codedInputStream.readBytes();
+    assertEquals(0x0, byteString.byteAt(0));
+    maliciousCapture.get(1)[0] = 0x9;
+    assertEquals(0x0, byteString.byteAt(0));
+
+    // test ByteBuffer
+
+    inputStream.reset();
+    maliciousCapture.clear();
+    codedInputStream = CodedInputStream.newInstance(inputStream, 1);
+    ByteBuffer byteBuffer = codedInputStream.readByteBuffer();
+    assertEquals(0x0, byteBuffer.get(0));
+    maliciousCapture.get(1)[0] = 0x9;
+    assertEquals(0x0, byteBuffer.get(0));
+
+
+    // test byte[]
+
+    inputStream.reset();
+    maliciousCapture.clear();
+    codedInputStream = CodedInputStream.newInstance(inputStream, 1);
+    byte[] byteArray = codedInputStream.readByteArray();
+    assertEquals(0x0, byteArray[0]);
+    maliciousCapture.get(1)[0] = 0x9;
+    assertEquals(0x9, byteArray[0]); // MODIFICATION! Should we fix?
+
+    // test rawBytes
+
+    inputStream.reset();
+    maliciousCapture.clear();
+    codedInputStream = CodedInputStream.newInstance(inputStream, 1);
+    int length = codedInputStream.readRawVarint32();
+    byteArray = codedInputStream.readRawBytes(length);
+    assertEquals(0x0, byteArray[0]);
+    maliciousCapture.get(1)[0] = 0x9;
+    assertEquals(0x9, byteArray[0]); // MODIFICATION! Should we fix?
+  }
+
+  public void testInvalidInputYieldsInvalidProtocolBufferException_readTag() throws Exception {
+    byte[] input = new byte[] {0x0a, (byte) 0xff, (byte) 0xff, (byte) 0xff, (byte) 0xff, 0x77};
+    CodedInputStream inputStream = CodedInputStream.newInstance(input);
+    try {
+      inputStream.readTag();
+      int size = inputStream.readRawVarint32();
+      inputStream.pushLimit(size);
+      inputStream.readTag();
+      fail();
+    } catch (InvalidProtocolBufferException ex) {
+      // Expected.
+    }
+  }
+
+  public void testInvalidInputYieldsInvalidProtocolBufferException_readBytes() throws Exception {
+    byte[] input =
+        new byte[] {0x0a, (byte) 0xff, (byte) 0xff, (byte) 0xff, (byte) 0xff, 0x67, 0x1a, 0x1a};
+    CodedInputStream inputStream = CodedInputStream.newInstance(input);
+    try {
+      inputStream.readTag();
+      int size = inputStream.readRawVarint32();
+      inputStream.pushLimit(size);
+      inputStream.readBytes();
+      fail();
+    } catch (InvalidProtocolBufferException ex) {
+      // Expected.
     }
   }
 }
