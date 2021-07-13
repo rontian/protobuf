@@ -1,0 +1,16 @@
+{
+    "name": "com.ronpad.google.protobuf",
+    "version": "3.17.3",
+    "displayName": "Google.Protobuf",
+    "author": {
+        "name": "rontian",
+        "email": "i@ronpad.com",
+        "url": "https://www.ronpad.com"
+    },
+    "keywords": [],
+    "description": "unity package manager Google.Protobuf",
+    "unity": "2019.4",
+    "license": "MIT",
+    "type": "library",
+    "dependencies": {}
+}
